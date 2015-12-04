@@ -126,8 +126,8 @@ fn main(dev: i32) -> i32 {
     let num_it  = 100;
     let arr_fld = Field { cpu : alloc_host(width * height * 4), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
     let out_fld = Field { cpu : alloc_host(width * height * 4), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
-    let mut arr = create_array(arr_fld);
-    let mut out = create_array(out_fld);
+    let arr     = create_array(arr_fld);
+    let out     = create_array(out_fld);
     let stencil = [b, a, b];
 
     for iter in range(0, num_it) {
@@ -136,9 +136,9 @@ fn main(dev: i32) -> i32 {
             out_acc.write(x, y, val);
         }
 
-        let tmp = arr;
-        arr = out;
-        out = tmp;
+        let tmp = arr.get(0);
+        arr.set(0, out.get(0));
+        out.set(0, tmp);
     }
 
     // do something with the result as test
