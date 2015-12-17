@@ -33,4 +33,11 @@ if(NOT (BACKEND STREQUAL "cpu" OR BACKEND STREQUAL "avx"))
     add_executable(reserve_shared ${RESERVE_SHARED_PROGRAM})
     target_link_libraries(reserve_shared ${THORIN_RUNTIME_LIBRARY} ${THORIN_RUNTIME_LIBRARIES})
     add_test("reserve_shared" reserve_shared)
+
+    thorin_runtime_wrap(PE_SKIP_PROGRAM
+        BACKEND ${BACKEND}
+        FILES pe_skip.impala)
+    add_executable(pe_skip ${PE_SKIP_PROGRAM})
+    target_link_libraries(pe_skip ${THORIN_RUNTIME_LIBRARY} ${THORIN_RUNTIME_LIBRARIES})
+    add_test("pe_skip" pe_skip)
 endif()
