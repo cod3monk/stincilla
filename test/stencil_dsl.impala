@@ -124,8 +124,8 @@ fn main(dev: i32) -> i32 {
     let a       = 0.2f;
     let b       = 1.0f - 4.0f * a;
     let num_it  = 100;
-    let arr_fld = Field { cpu : alloc_host(width * height * 4), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
-    let out_fld = Field { cpu : alloc_host(width * height * 4), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
+    let arr_fld = Field { cpu : alloc_host(width * height * sizeof[f32]()), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
+    let out_fld = Field { cpu : alloc_host(width * height * sizeof[f32]()), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
     let arr     = create_array(arr_fld);
     let out     = create_array(out_fld);
     let stencil = [b, a, b];
