@@ -48,6 +48,8 @@ fn iteration_point(out: Img,
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc);
             }
         }
+
+        acc_sync(acc_dev());
     }
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
@@ -79,6 +81,7 @@ fn iteration(out: Img, arr: Img, mask: Mask,
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, arr_acc, mask);
             }
         }
+        acc_sync(acc_dev());
     }
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
@@ -169,6 +172,7 @@ fn iteration_bounds(out: Img, arr: Img, mask: Mask,
                     }
                 }
             }
+            acc_sync(acc_dev());
         }
     } else {
         // bounds account for unroll factor
@@ -205,6 +209,7 @@ fn iteration_bounds(out: Img, arr: Img, mask: Mask,
                         body(gid_x, gid_y + i * acc_bdimy(), out_acc, arr_acc, mask);
                     }
                 }
+                acc_sync(acc_dev());
             }
         }
     }
@@ -272,6 +277,7 @@ fn iteration_advanced(out: Img, arr: Img, mask: Mask,
                 body(tid_x, tid_y, out_acc, arr_acc, mask);
             }
         }
+        acc_sync(acc_dev());
     }
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
@@ -309,6 +315,7 @@ fn iteration_sep(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep,
                 body(gid_x, gid_y + i * acc_bdimy(), tmp_acc, arr_acc, mask_col, is_row);
             }
         }
+        acc_sync(acc_dev());
     }
     for benchmark_acc() {
         with acc(acc_dev(), grid, block_row) @{
@@ -323,6 +330,7 @@ fn iteration_sep(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep,
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, tmp_acc, mask_row, is_row);
             }
         }
+        acc_sync(acc_dev());
     }
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
@@ -346,6 +354,7 @@ fn iteration_sep_bounds(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep
     let config_col = compute_config((1, mask_col.size/2), unroll);
     let block_row  = config_row(0);
     let block_col  = config_col(0);
+
     let bx         = config_row(1)(0);
     let by         = config_col(1)(1);
     let get_acc_bh = if acc_use_tex() { get_acc_tex_bh } else { get_acc_bh };
@@ -387,6 +396,7 @@ fn iteration_sep_bounds(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep
                     }
                 }
             }
+            acc_sync(acc_dev());
         }
 
         // row component
@@ -417,6 +427,7 @@ fn iteration_sep_bounds(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep
                     }
                 }
             }
+            acc_sync(acc_dev());
         }
     } else {
         let hu = out.height / unroll;
@@ -445,6 +456,7 @@ fn iteration_sep_bounds(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep
                         body(gid_x, gid_y + i * acc_bdimy(), tmp_acc, arr_acc, mask_col, is_row);
                     }
                 }
+                acc_sync(acc_dev());
             }
         }
 
@@ -472,9 +484,207 @@ fn iteration_sep_bounds(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep
                         body(gid_x, gid_y + i * acc_bdimy(), out_acc, tmp_acc, mask_row, is_row);
                     }
                 }
+                acc_sync(acc_dev());
             }
         }
     }
+
+    copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
+    release(arr_gpu.buf);
+    release(out_gpu.buf);
+    release(tmp_gpu.buf);
+}
+
+fn get_vector_length() -> int { 1 }
+fn get_thread_number() -> int { 4 }
+fn outer_loop_step(lower: int, upper: int, step: int, body: fn(int, fn())) -> () {
+    for i in parallel(@get_thread_number(), 0, (upper-lower)/step) {
+        body(i * step + lower);
+    }
+}
+fn outer_loop(lower: int, upper: int, body: fn(int, fn())) -> () {
+    for i in parallel(@get_thread_number(), lower, upper) {
+        body(i);
+    }
+}
+fn inner_loop(lower: int, upper: int, body: fn(int, fn())) -> () {
+    if lower < upper {
+        body(lower);
+        inner_loop(lower+1, upper, body, return)
+    }
+}
+
+struct CPUBounds {
+    Bounds2DCol    : [(i32, i32) * 3],
+    Region2DCol    : [i32        * 3],
+    Parallelize    : [i32        * 3],
+
+    Bounds2DRow    : [(i32, i32) * 3],
+    Region2DRow    : [i32        * 3],
+}
+
+struct GPUBounds {
+  Bounds2DCol : (i32, i32)      ,
+  BlockCol    : (i32, i32, i32) ,
+
+  Bounds2DRow : [(i32, i32) * 3],
+  Region2DRow : [i32        * 3],
+  BlockRow    : (i32, i32, i32)
+}
+
+fn compute_bounds(img_width: i32, img_height: i32, mask_width: i32, mask_height: i32,
+                       unroll: i32) -> (CPUBounds, GPUBounds) {
+    let mut cpu_bounds : CPUBounds;
+    let mut gpu_bounds : GPUBounds;
+
+    let quar_width  = img_width  / 4;
+    let quar_height = img_height / 4;
+    let half_width  = img_width  / 2;
+    let half_height = img_height / 2;
+
+    let bhy = round_up(mask_height / 2, unroll);
+    let bhx = round_up(mask_width  / 2, get_vector_length());
+
+    cpu_bounds.Bounds2DCol = [
+        (0               , bhy),
+        (bhy             , (img_height - 2*bhy)/2),
+        (img_height - bhy, img_height)
+    ];
+
+    cpu_bounds.Region2DCol = [1, 4, 7];
+    cpu_bounds.Parallelize = [0, 1, 0];
+
+    cpu_bounds.Bounds2DRow = [
+        (0              , bhx),
+        (bhx            , img_width - bhx),
+        (img_width - bhx, img_width)
+    ];
+
+    cpu_bounds.Region2DRow = [3, 4, 5];
+
+    let config_row = compute_config((mask_width/2, 1), unroll);
+    let config_col = compute_config((1, mask_height/2), unroll);
+
+    gpu_bounds.BlockRow  = config_row(0);
+    gpu_bounds.BlockCol  = config_col(0);
+
+    let bx = config_row(1)(0);
+
+    gpu_bounds.Bounds2DCol = ((img_height - 2*bhy)/2, img_height - bhy);
+
+    gpu_bounds.Region2DRow = [ 3, 4, 5 ];
+    gpu_bounds.Bounds2DRow = [
+          (0                                    , bx*gpu_bounds.BlockRow(0)),
+          (bx*gpu_bounds.BlockRow(0)            , img_width - bx*gpu_bounds.BlockRow(0)),
+          (img_width - bx*gpu_bounds.BlockRow(0), img_width)
+      ];
+
+    (cpu_bounds, gpu_bounds)
+}
+
+fn iteration_sep_hetero(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskSep,
+                        bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32,
+                        body: fn(i32, i32, Acc, Acc, MaskSep, bool) -> ()
+                       ) -> () {
+    let arr_gpu = get_img(acc_alloc(acc_dev(), arr.width * arr.height * sizeof[f32]()), arr.width, arr.height);
+    let out_gpu = get_img(acc_alloc(acc_dev(), out.width * out.height * sizeof[f32]()), out.width, out.height);
+    let tmp_gpu = get_img(acc_alloc(acc_dev(), out.width * out.height * sizeof[f32]()), out.width, out.height);
+    copy(arr.buf, arr_gpu.buf, arr.width * arr.height * sizeof[f32]());
+
+    ///
+    /// Process CPU part
+    ///
+    let unroll = 1;
+    let bounds = compute_bounds(arr.width, arr.height, mask_row.size, mask_col.size, unroll);
+    let cpu_bounds = bounds(0);
+
+    //for benchmark_cpu() {
+    fn body_cpu() -> () {
+        for iter_col in @range(0, 3) {
+            let bounds_col = cpu_bounds.Bounds2DCol(iter_col);
+            let region_col = cpu_bounds.Region2DCol(iter_col);
+            let outer_col = if cpu_bounds.Parallelize(iter_col) == 1 { outer_loop_step } else { range_step };
+            let inner_col = if cpu_bounds.Parallelize(iter_col) == 1 { inner_loop } else { range };
+
+            for  y in $outer_col(bounds_col(0), bounds_col(1), unroll) @{
+                // allocate temporary array per thread
+                let tmp = alloc_cpu(out_gpu.width * unroll * sizeof[f32]());
+
+                for x in $inner_col(0, out_gpu.width) @{
+                    let is_row = false;
+
+                    let arr_acc = get_acc_bh_offset(arr_gpu, 0, y, region_col, bh_lower, bh_upper);
+                    let tmp_acc = get_acc_memory(bitcast[&[f32]](tmp.data), out_gpu.width, unroll);
+                    for i in range(0, unroll) {
+                        body(x, i, tmp_acc, arr_acc, mask_col, is_row);
+                    }
+                }
+                for iter_row in range(0, 3) {
+                    let idx = iter_row;
+                    let bounds_row = cpu_bounds.Bounds2DRow(idx);
+                    let region_row = cpu_bounds.Region2DRow(idx);
+                    let inner_row = if region_row == 4 { inner_loop } else { range };
+                    for x in $inner_row(bounds_row(0), bounds_row(1)) @{
+                        let is_row = true;
+
+                        let tmp_acc = get_acc_bh_memory(bitcast[&[f32]](tmp.data), out_gpu.width, unroll,
+                                                        region_row, bh_lower, bh_upper);
+                        let out_acc = get_acc_offset(out_gpu, 0, y);
+                        for i in range(0, unroll) {
+                            body(x, i, out_acc, tmp_acc, mask_row, is_row);
+                        }
+                    }
+                }
+
+                release(tmp);
+            }
+        }
+    }
+
+    ///
+    /// Process GPU part
+    ///
+    let gpu_bounds = bounds(1);
+    let grid   = (out.width, gpu_bounds.Bounds2DCol(1) - gpu_bounds.Bounds2DCol(0), 1);
+    let gpu_height = gpu_bounds.Bounds2DCol(1) - gpu_bounds.Bounds2DCol(0);
+
+    let arr_acc = get_acc_bh(arr_gpu, 4, bh_lower, bh_upper);
+    let tmp_acc = get_acc(tmp_gpu);
+
+    //for benchmark_acc() {
+    fn body_acc() -> () {
+        with acc(acc_dev(), grid, gpu_bounds.BlockCol) @{
+            let gid_x = acc_gidx();
+            let gid_y = gpu_bounds.Bounds2DCol(0) * unroll +
+                        acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
+            let is_row = false;
+
+            for i in range(0, unroll) {
+                body(gid_x, gid_y + i * acc_bdimy(), tmp_acc, arr_acc, mask_col, is_row);
+            }
+        }
+        for iter in @range(0, 3) {
+            let region = gpu_bounds.Region2DRow(iter);
+            let cur_bounds = gpu_bounds.Bounds2DRow(iter);
+            let grid   = (cur_bounds(1) - cur_bounds(0), gpu_height/unroll, 1);
+
+            let tmp_acc = get_acc_bh(tmp_gpu, region, bh_lower, bh_upper);
+            let out_acc = get_acc(out_gpu);
+
+            with acc(acc_dev(), grid, gpu_bounds.BlockRow) @{
+                let gid_x = cur_bounds(0) + acc_gidx();
+                let gid_y = 2046 + acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
+                let is_row = true;
+
+                for i in range(0, unroll) {
+                    body(gid_x, gid_y + i * acc_bdimy(), out_acc, tmp_acc, mask_row, is_row);
+                }
+            }
+        }
+        //acc_sync(acc_dev());
+    }
+
+    benchmark_hetero(body_acc, body_cpu);
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
     release(arr_gpu.buf);
@@ -567,6 +777,7 @@ fn iteration_sep_advanced(out: Img, arr: Img, mask_row: MaskSep, mask_col: MaskS
                 body(tid_x, tid_y, out_acc, arr_acc, mask_row, is_row);
             }
         }
+        acc_sync(acc_dev());
     }
 
     copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());

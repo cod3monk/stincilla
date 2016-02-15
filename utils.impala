@@ -121,6 +121,7 @@ fn read_pixel(x: i32, y: i32, region: i32, roi: RoI, read: fn(i32, i32) -> f32,
 
 static mut total_kernel_timing = 0i64;
 static mut total_cpu_timing = 0i64;
+static mut total_hetero_timing = 0i64;
 
 fn benchmark(get_time: fn() -> i64, num_iter: i32, body: fn() -> ()) -> i64 {
     let times_buf = alloc_cpu(num_iter * sizeof[i64]());
@@ -145,8 +146,88 @@ fn benchmark(get_time: fn() -> i64, num_iter: i32, body: fn() -> ()) -> i64 {
     median
 }
 
-fn benchmark_acc(body: fn() -> ()) -> () { total_kernel_timing += benchmark(thorin_get_kernel_time, 7, body) }
-fn benchmark_cpu(body: fn() -> ()) -> () { total_cpu_timing    += benchmark(thorin_get_micro_time, 27, body) }
+fn benchmark_acc(body: fn() -> ()) -> () {
+    let time = benchmark(thorin_get_kernel_time, 7, body);
+    total_hetero_timing += time;
+    total_kernel_timing += time
+}
+
+fn benchmark_cpu(body: fn() -> ()) -> () {
+    let time = benchmark(thorin_get_micro_time, 27, body);
+    total_hetero_timing += time;
+    total_cpu_timing += time
+
+}
+
+fn benchmark_hetero(body_acc: fn() -> (), body_cpu: fn() -> ()) -> () {
+    let num_iter = 27;
+    let times_buf =     alloc_cpu(num_iter * sizeof[i64]());
+    let mut times =     bitcast[&[i64]](times_buf.data);
+    let times_cpu_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut times_cpu = bitcast[&[i64]](times_cpu_buf.data);
+    let times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut times_acc = bitcast[&[i64]](times_acc_buf.data);
+
+    for i in $range(0, num_iter) @{
+        let start_acc = thorin_get_kernel_time();
+        body_acc();
+
+        let start_cpu = thorin_get_micro_time();
+        body_cpu();
+
+        acc_sync(acc_dev());
+
+        let time_cpu = thorin_get_micro_time() - start_cpu;
+        let time_acc = thorin_get_kernel_time() - start_acc;
+
+        times(i) = max(time_acc, time_cpu);
+
+        times_cpu(i) = time_cpu;
+        times_acc(i) = time_acc;
+    }
+
+    let median = times(num_iter/2);
+    sort_i64(num_iter, bitcast[&[i64]](times));
+
+    print_string("Timing: ");
+    print_double(times(num_iter/2) as f64 / 1000.0);
+    print_string(" | ");
+    print_double(times(0) as f64 / 1000.0);
+    print_string(" | ");
+    print_double(times(num_iter-1) as f64 / 1000.0);
+    print_string(" (median(");
+    print_int(num_iter);
+    print_string(") | minimum | maximum) ms\n");
+
+    sort_i64(num_iter, bitcast[&[i64]](times_cpu));
+    let median_cpu = times_cpu(num_iter / 2);
+    sort_i64(num_iter, bitcast[&[i64]](times_acc));
+    let median_acc = times_acc(num_iter / 2);
+
+    release(times_buf);
+    release(times_cpu_buf);
+    release(times_acc_buf);
+
+    total_hetero_timing += median;
+    total_cpu_timing    += median_cpu;
+    total_kernel_timing += median_acc;
+}
+
+fn max(x: i64, y: i64) -> i64 {
+    if x > y {
+        x
+    } else {
+	y
+    }
+}
+
+fn min(x: i64, y: i64) -> i64 {
+    if x > y {
+        x
+    } else {
+	y
+    }
+}
 
 fn print_total_timing() -> () {
     print_string("Total timing for cpu / kernel: ");
