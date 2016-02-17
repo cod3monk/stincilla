@@ -43,8 +43,8 @@ fn apply_stencil_sep(x: i32, y: i32, acc: Acc, mask: MaskSep, row: bool) -> f32 
 fn main() -> i32 {
     let width  = 4096;
     let height = 4096;
-    let arr    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
-    let out    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
+    let arr    = Img { buf : acc_alloc(acc_dev(), width * height * sizeof[f32]()), width : width, height : height, stride : width };
+    let out    = Img { buf : acc_alloc(acc_dev(), width * height * sizeof[f32]()), width : width, height : height, stride : width };
     init_rand(bitcast[&[f32]](arr.buf.data), arr.stride, out.height);
     init_zero(bitcast[&[f32]](out.buf.data), out.stride, out.height);
 

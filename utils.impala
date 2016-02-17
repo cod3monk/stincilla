@@ -159,7 +159,7 @@ fn benchmark_cpu(body: fn() -> ()) -> () {
 
 }
 
-fn benchmark_hetero(body_acc: fn() -> (), body_cpu: fn() -> ()) -> () {
+fn benchmark_hetero(body_acc1: fn() -> (), body_acc2: fn() -> (), body_cpu: fn() -> ()) -> () {
     let num_iter = 27;
     let times_buf =     alloc_cpu(num_iter * sizeof[i64]());
     let mut times =     bitcast[&[i64]](times_buf.data);
@@ -170,20 +170,38 @@ fn benchmark_hetero(body_acc: fn() -> (), body_cpu: fn() -> ()) -> () {
 
     for i in $range(0, num_iter) @{
         let start_acc = thorin_get_kernel_time();
-        body_acc();
+        body_acc1();
+        body_acc2();
 
         let start_cpu = thorin_get_micro_time();
         body_cpu();
+        let time_cpu = (thorin_get_micro_time() - start_cpu);
 
         acc_sync(acc_dev());
-
-        let time_cpu = thorin_get_micro_time() - start_cpu;
         let time_acc = thorin_get_kernel_time() - start_acc;
 
         times(i) = max(time_acc, time_cpu);
-
         times_cpu(i) = time_cpu;
         times_acc(i) = time_acc;
+/*
+        let mut start_acc = thorin_get_kernel_time();
+        body_acc1();
+        acc_sync(acc_dev());
+        let time1 = thorin_get_kernel_time() - start_acc;
+
+        let start_cpu = thorin_get_micro_time();
+        body_cpu();
+        let time_cpu = (thorin_get_micro_time() - start_cpu);
+
+        start_acc = thorin_get_kernel_time();
+        body_acc2();
+        acc_sync(acc_dev());
+        let time_acc = (thorin_get_kernel_time() - start_acc) + time1;
+
+        times(i) = max(time_acc, time_cpu);
+        times_cpu(i) = time_cpu;
+        times_acc(i) = time_acc;
+*/
     }
 
     let median = times(num_iter/2);
