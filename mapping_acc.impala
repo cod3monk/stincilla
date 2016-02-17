@@ -664,7 +664,7 @@ fn iteration_sep_hetero(out_gpu: Img, arr_gpu: Img, mask_row: MaskSep, mask_col:
     let tmp_acc = get_acc(tmp_gpu);
 
     //for benchmark_acc() {
-    fn body_acc1() -> () {
+    fn body_acc() -> () {
         with acc(acc_dev(), grid, gpu_bounds.BlockCol) @{
             let gid_x = acc_gidx();
             let gid_y = gpu_bounds.Bounds2DCol(0) * unroll +
@@ -675,9 +675,6 @@ fn iteration_sep_hetero(out_gpu: Img, arr_gpu: Img, mask_row: MaskSep, mask_col:
                 body(gid_x, gid_y + i * acc_bdimy(), tmp_acc, arr_acc, mask_col, is_row);
             }
         }
-    }
-
-    fn body_acc2() -> () {
         for iter in @range(0, 3) {
             let region = gpu_bounds.Region2DRow(iter);
             let cur_bounds = gpu_bounds.Bounds2DRow(iter);
@@ -699,7 +696,7 @@ fn iteration_sep_hetero(out_gpu: Img, arr_gpu: Img, mask_row: MaskSep, mask_col:
         //acc_sync(acc_dev());
     }
 
-    benchmark_hetero(body_acc1, body_acc2, body_cpu);
+    benchmark_hetero(body_acc, body_cpu);
 
     /*
     for i in range(0, 3) {
