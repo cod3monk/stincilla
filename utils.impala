@@ -118,19 +118,44 @@ fn read_pixel(x: i32, y: i32, region: i32, roi: RoI, read: fn(i32, i32) -> f32,
     read(idx_x, idx_y)
 }
 
+static mut total_overall_timing = 0i64;
 
 static mut total_kernel_timing = 0i64;
+static mut total_kernel_startup_timing = 0i64;
+
 static mut total_cpu_timing = 0i64;
+
 static mut total_hetero_timing = 0i64;
 
-fn benchmark(get_time: fn() -> i64, num_iter: i32, body: fn() -> ()) -> i64 {
+fn benchmark(get_time: fn() -> i64, num_iter: i32, body: fn() -> ()) -> (i64, i64) {
     let times_buf = alloc_cpu(num_iter * sizeof[i64]());
     let mut times = bitcast[&[i64]](times_buf.data);
+    let overall_times_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut overall_times = bitcast[&[i64]](overall_times_buf.data);
+
     for i in $range(0, num_iter) @{
+        let start_all = thorin_get_micro_time();
         let start = get_time();
         body();
+        acc_sync(acc_dev());
         times(i) = get_time() - start;
+        let finish = thorin_get_micro_time();
+        let diff = finish - start_all;
+        overall_times(i) = diff;
     }
+
+    sort_i64(num_iter, bitcast[&[i64]](overall_times));
+
+    print_string("Overall Timing (incl. all overheads): ");
+    print_double(overall_times(num_iter/2) as f64 / 1000.0);
+    print_string(" | ");
+    print_double(overall_times(0) as f64 / 1000.0);
+    print_string(" | ");
+    print_double(overall_times(num_iter-1) as f64 / 1000.0);
+    print_string(" (median(");
+    print_int(num_iter);
+    print_string(") | minimum | maximum) ms\n");
+
     sort_i64(num_iter, bitcast[&[i64]](times));
     print_string("Timing: ");
     print_double(times(num_iter/2) as f64 / 1000.0);
@@ -140,73 +165,164 @@ fn benchmark(get_time: fn() -> i64, num_iter: i32, body: fn() -> ()) -> i64 {
     print_double(times(num_iter-1) as f64 / 1000.0);
     print_string(" (median(");
     print_int(num_iter);
-    print_string(") | minimum | maximum) ms\n");
+    print_string(") | minimum | maximum) ms\n\n");
+
     let median = times(num_iter/2);
+    let overall_median = overall_times(num_iter/2);
     release(times_buf);
-    median
+    release(overall_times_buf);
+    (median, overall_median)
 }
 
 fn benchmark_acc(body: fn() -> ()) -> () {
-    let time = benchmark(thorin_get_kernel_time, 7, body);
-    total_hetero_timing += time;
-    total_kernel_timing += time
+    let timing = benchmark(thorin_get_kernel_time, 7, body);
+    total_hetero_timing += timing(0);
+    total_kernel_timing += timing(0);
+    total_overall_timing += timing(1);
 }
 
 fn benchmark_cpu(body: fn() -> ()) -> () {
-    let time = benchmark(thorin_get_micro_time, 27, body);
-    total_hetero_timing += time;
-    total_cpu_timing += time
-
+    let timing = benchmark(thorin_get_micro_time, 27, body);
+    total_hetero_timing += timing(0);
+    total_cpu_timing += timing(0);
+    total_overall_timing += timing(1);
 }
 
 fn benchmark_hetero(body_acc: fn() -> (), body_cpu: fn() -> ()) -> () {
     let num_iter = 27;
-    let times_buf =     alloc_cpu(num_iter * sizeof[i64]());
+
+    let idxs_buf = alloc_cpu(num_iter * sizeof[i32]());
+    let mut idxs =     bitcast[&[i32]](idxs_buf.data);
+
+    let times_buf = alloc_cpu(num_iter * sizeof[i64]());
     let mut times =     bitcast[&[i64]](times_buf.data);
+
     let times_cpu_buf = alloc_cpu(num_iter * sizeof[i64]());
     let mut times_cpu = bitcast[&[i64]](times_cpu_buf.data);
+
+    let prequeue_times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut prequeue_times_acc = bitcast[&[i64]](prequeue_times_acc_buf.data);
+    let queue_times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut queue_times_acc = bitcast[&[i64]](queue_times_acc_buf.data);
+    let startup_times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut startup_times_acc = bitcast[&[i64]](startup_times_acc_buf.data);
     let times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
     let mut times_acc = bitcast[&[i64]](times_acc_buf.data);
+    let postqueue_times_acc_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut postqueue_times_acc = bitcast[&[i64]](postqueue_times_acc_buf.data);
+
+    let overall_times_buf = alloc_cpu(num_iter * sizeof[i64]());
+    let mut overall_times = bitcast[&[i64]](overall_times_buf.data);
 
     for i in $range(0, num_iter) @{
+        let start = thorin_get_micro_time();
         let start_acc = thorin_get_kernel_time();
-        body_acc();
+        let startup_start_acc = thorin_get_kernel_startup_time();
+        let prequeue_start_acc = thorin_get_kernel_prequeue_time();
+        let queue_start_acc = thorin_get_kernel_queue_time();
+        let postqueue_start_acc = thorin_get_kernel_postqueue_time();
 
-        let start_cpu = thorin_get_micro_time();
-        body_cpu();
-        let time_cpu = (thorin_get_micro_time() - start_cpu);
+        let gpu_t = with spawn_thread() {
+            body_acc();
+            acc_sync(acc_dev());
+        };
 
-        acc_sync(acc_dev());
+        let cpu_thread_start_delay = thorin_get_micro_time() - start;
+
+        let cpu_t = with spawn_thread() {
+            body_cpu();
+        };
+
+        sync_thread(cpu_t);
+        let time_cpu = (thorin_get_micro_time() - start);
+
+        sync_thread(gpu_t);
         let time_acc = thorin_get_kernel_time() - start_acc;
+        let startup_time = thorin_get_kernel_startup_time() - startup_start_acc;
+        let queue_time = thorin_get_kernel_queue_time() - queue_start_acc;
+        let prequeue_time = thorin_get_kernel_prequeue_time() - prequeue_start_acc;
+        let postqueue_time = thorin_get_kernel_postqueue_time() - postqueue_start_acc;
 
+        let finish = thorin_get_micro_time();
+        let diff = finish - start;
+
+        overall_times(i) = diff;
         times(i) = max(time_acc, time_cpu);
         times_cpu(i) = time_cpu;
         times_acc(i) = time_acc;
-/*
-        let mut start_acc = thorin_get_kernel_time();
-        body_acc1();
-        acc_sync(acc_dev());
-        let time1 = thorin_get_kernel_time() - start_acc;
-
-        let start_cpu = thorin_get_micro_time();
-        body_cpu();
-        let time_cpu = (thorin_get_micro_time() - start_cpu);
-
-        start_acc = thorin_get_kernel_time();
-        body_acc2();
-        acc_sync(acc_dev());
-        let time_acc = (thorin_get_kernel_time() - start_acc) + time1;
-
-        times(i) = max(time_acc, time_cpu);
-        times_cpu(i) = time_cpu;
-        times_acc(i) = time_acc;
-*/
+        startup_times_acc(i) = startup_time;
+        queue_times_acc(i) = queue_time;
+        prequeue_times_acc(i) = prequeue_time;
+        postqueue_times_acc(i) = postqueue_time;
     }
 
-    let median = times(num_iter/2);
-    sort_i64(num_iter, bitcast[&[i64]](times));
+    sort_i64_with_idxs(num_iter, bitcast[&[i64]](times), idxs);
+    let median_idx = idxs(num_iter/2);
 
-    print_string("Timing: ");
+
+    let median = times(num_iter/2);
+
+    let median_startup = startup_times_acc(median_idx);
+    let median_queue = queue_times_acc(median_idx);
+    let median_prequeue = prequeue_times_acc(median_idx);
+    let median_postqueue = postqueue_times_acc(median_idx);
+    let median_overall = overall_times(median_idx);
+    //sort_i64(num_iter, bitcast[&[i64]](times_cpu));
+    let median_cpu = times_cpu(median_idx);
+
+    //sort_i64(num_iter, bitcast[&[i64]](times_acc));
+    let median_acc = times_acc(median_idx);
+
+    let show_profile_info = false;
+
+    if (show_profile_info) {
+        let gap = median_overall - (median_prequeue + median_queue + median_startup + median + median_postqueue);
+        let mut start = 0 as i64;
+        print_profiling_entry("Set Kernel Args", start, median_prequeue, 0);
+        print_profiling_entry("Execute CPU Part", start, median_cpu, 2);
+        start += median_prequeue;
+        print_profiling_entry("Enqueue Kernel", start, median_queue, 0);
+        start += median_queue;
+        print_profiling_entry("Submit Kernel", start, median_startup, 0);
+        start += median_startup;
+        print_profiling_entry("Execute Kernel", start, median_acc, 1);
+        start += median_acc;
+        print_profiling_entry("Gap", start, gap, 1);
+        start += gap;
+        print_profiling_entry("Gather Profile Info & Clean Up", start, median_postqueue, 0);
+    }
+
+    release(idxs_buf);
+    release(times_buf);
+    release(times_cpu_buf);
+    release(times_acc_buf);
+    release(startup_times_acc_buf);
+    release(overall_times_buf);
+    release(queue_times_acc_buf);
+    release(prequeue_times_acc_buf);
+    release(postqueue_times_acc_buf);
+
+    total_hetero_timing += median;
+    total_cpu_timing    += median_cpu;
+    total_kernel_timing += median_acc;
+    total_overall_timing += median_overall;
+    total_kernel_startup_timing += median_startup;
+}
+
+fn print_profiling_entry(name: &[u8], start: i64, duration: i64, stream: i32) -> () {
+    print_string(name);
+    print_string(", ");
+    print_long(start);
+    print_string(", ");
+    print_long(duration);
+    print_string(", ");
+    print_int(stream);
+    print_string("\n");
+}
+
+fn print_timing_info(num_iter: i32, times: &[i64], name: &[u8]) -> () {
+    print_string(name);
+    print_string(": ");
     print_double(times(num_iter/2) as f64 / 1000.0);
     print_string(" | ");
     print_double(times(0) as f64 / 1000.0);
@@ -215,35 +331,14 @@ fn benchmark_hetero(body_acc: fn() -> (), body_cpu: fn() -> ()) -> () {
     print_string(" (median(");
     print_int(num_iter);
     print_string(") | minimum | maximum) ms\n");
-
-    sort_i64(num_iter, bitcast[&[i64]](times_cpu));
-    let median_cpu = times_cpu(num_iter / 2);
-    sort_i64(num_iter, bitcast[&[i64]](times_acc));
-    let median_acc = times_acc(num_iter / 2);
-
-    release(times_buf);
-    release(times_cpu_buf);
-    release(times_acc_buf);
-
-    total_hetero_timing += median;
-    total_cpu_timing    += median_cpu;
-    total_kernel_timing += median_acc;
 }
 
 fn max(x: i64, y: i64) -> i64 {
-    if x > y {
-        x
-    } else {
-	y
-    }
+    if x > y { x } else { y }
 }
 
 fn min(x: i64, y: i64) -> i64 {
-    if x > y {
-        x
-    } else {
-	y
-    }
+    if x < y { x } else { y }
 }
 
 fn print_total_timing() -> () {
@@ -251,7 +346,11 @@ fn print_total_timing() -> () {
     print_double(total_cpu_timing as f64 / 1000.0);
     print_string(" / ");
     print_double(total_kernel_timing as f64 / 1000.0);
-    print_string(" ms\n")
+    print_string(" ms\n");
+
+    print_string("Total overall timing (incl. all overheads): ");
+    print_double(total_overall_timing as f64 / 1000.0);
+    print_string(" ms\n");
 }
 
 fn sort_i64(num: i32, mut arr: &[i64]) -> () {
@@ -266,6 +365,28 @@ fn sort_i64(num: i32, mut arr: &[i64]) -> () {
         arr(j) = x;
     }
 }
+
+fn sort_i64_with_idxs(num: i32, mut arr: &[i64], mut idx_arr: &[i32]) -> () {
+
+    for i in range(0, num) {
+        idx_arr(i) = i;
+    }
+
+    // insertion sort
+    for i in range(1, num) {
+        let x = arr(i);
+        let x_idx = idx_arr(i);
+        let mut j = i;
+        while j > 0 && arr(j-1) > x {
+            arr(j) = arr(j-1);
+            idx_arr(j) = idx_arr(j-1);
+            j = j - 1;
+        }
+        arr(j) = x;
+        idx_arr(j) = x_idx;
+    }
+}
+
 fn sort_f32(num: i32, mut arr: &[f32]) -> () {
     // insertion sort
     for i in range(1, num) {
