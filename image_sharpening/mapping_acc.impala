@@ -9,16 +9,16 @@ fn iteration1f1i(out: Img, arr: Imgi16,
     let grid   = (out.width, out.height/unroll, 1);
     let block  = (32, 4, 1);
 
-    let out_gpu = get_img    (acc_alloc(acc_dev(), out.width * out.height * 4), out.width, out.height);
-    let arr_gpu = get_img_i16(acc_alloc(acc_dev(), arr.width * arr.height * 2), arr.width, arr.height);
-    copy(arr.buf, arr_gpu.buf, arr.width * arr.height * 2);
+    let out_gpu = get_img    (acc_alloc(acc_dev(), out.width * out.height * sizeof[f32]()), out.width, out.height);
+    let arr_gpu = get_img_i16(acc_alloc(acc_dev(), arr.width * arr.height * sizeof[i16]()), arr.width, arr.height);
+    copy(arr.buf, arr_gpu.buf, arr.width * arr.height * sizeof[i16]());
 
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             let gid_x = acc_gidx();
             let gid_y = acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
-            let out_acc = get_write_acc(out_gpu);
-            let arr_acc = get_read_acci16(arr_gpu, 10, bh_lower, bh_upper);
+            let out_acc = get_acc(out_gpu);
+            let arr_acc = get_acci16_bh(arr_gpu, 10, bh_lower, bh_upper);
 
             for i in range(0, unroll) {
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, arr_acc);
@@ -26,7 +26,7 @@ fn iteration1f1i(out: Img, arr: Imgi16,
         }
     }
 
-    copy(out_gpu.buf, out.buf, out.width * out.height * 4);
+    copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[f32]());
     release(out_gpu.buf);
     release(arr_gpu.buf);
 }
@@ -38,16 +38,16 @@ fn iteration2i(out: Imgi16, arr: Imgi16,
     let grid   = (out.width, out.height/unroll, 1);
     let block  = (32, 4, 1);
 
-    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * 2), out.width, out.height);
-    let arr_gpu = get_img_i16(acc_alloc(acc_dev(), arr.width * arr.height * 2), arr.width, arr.height);
-    copy(arr.buf, arr_gpu.buf, arr.width * arr.height * 2);
+    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * sizeof[i16]()), out.width, out.height);
+    let arr_gpu = get_img_i16(acc_alloc(acc_dev(), arr.width * arr.height * sizeof[i16]()), arr.width, arr.height);
+    copy(arr.buf, arr_gpu.buf, arr.width * arr.height * sizeof[i16]());
 
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             let gid_x = acc_gidx();
             let gid_y = acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
-            let out_acc = get_write_acci16(out_gpu);
-            let arr_acc = get_read_acci16(arr_gpu, 10, bh_lower, bh_upper);
+            let out_acc = get_acci16(out_gpu);
+            let arr_acc = get_acci16_bh(arr_gpu, 10, bh_lower, bh_upper);
 
             for i in range(0, unroll) {
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, arr_acc);
@@ -55,7 +55,7 @@ fn iteration2i(out: Imgi16, arr: Imgi16,
         }
     }
 
-    copy(out_gpu.buf, out.buf, out.width * out.height * 2);
+    copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[i16]());
     release(out_gpu.buf);
     release(arr_gpu.buf);
 }
@@ -67,19 +67,19 @@ fn iteration2i1m(out: Imgi16, img: Imgi16, map: Img,
     let grid   = (out.width, out.height/unroll, 1);
     let block  = (32, 4, 1);
 
-    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * 2), out.width, out.height);
-    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * 2), img.width, img.height);
-    let map_gpu = get_img    (acc_alloc(acc_dev(), map.width * map.height * 4), map.width, map.height);
-    copy(img.buf, img_gpu.buf, img.width * img.height * 2);
-    copy(map.buf, map_gpu.buf, map.width * map.height * 2);
+    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * sizeof[i16]()), out.width, out.height);
+    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * sizeof[i16]()), img.width, img.height);
+    let map_gpu = get_img    (acc_alloc(acc_dev(), map.width * map.height * sizeof[f32]()), map.width, map.height);
+    copy(img.buf, img_gpu.buf, img.width * img.height * sizeof[i16]());
+    copy(map.buf, map_gpu.buf, map.width * map.height * sizeof[f32]());
 
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             let gid_x = acc_gidx();
             let gid_y = acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
-            let out_acc = get_write_acci16(out_gpu);
-            let img_acc = get_read_acci16(img_gpu, 10, bh_lower, bh_upper);
-            let map_acc = get_read_acc(map_gpu, 4, nobh_center, nobh_center);
+            let out_acc = get_acci16(out_gpu);
+            let img_acc = get_acci16_bh(img_gpu, 10, bh_lower, bh_upper);
+            let map_acc = get_acc(map_gpu);
 
             for i in range(0, unroll) {
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, img_acc, map_acc);
@@ -87,7 +87,7 @@ fn iteration2i1m(out: Imgi16, img: Imgi16, map: Img,
         }
     }
 
-    copy(out_gpu.buf, out.buf, out.width * out.height * 2);
+    copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[i16]());
     release(out_gpu.buf);
     release(img_gpu.buf);
     release(map_gpu.buf);
@@ -99,19 +99,19 @@ fn iteration3i(out: Imgi16, img: Imgi16, tmp: Imgi16,
     let grid   = (out.width, out.height/unroll, 1);
     let block  = (32, 4, 1);
 
-    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * 2), out.width, out.height);
-    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * 2), img.width, img.height);
-    let tmp_gpu = get_img_i16(acc_alloc(acc_dev(), tmp.width * tmp.height * 2), tmp.width, tmp.height);
-    copy(img.buf, img_gpu.buf, img.width * img.height * 2);
-    copy(tmp.buf, tmp_gpu.buf, tmp.width * tmp.height * 2);
+    let out_gpu = get_img_i16(acc_alloc(acc_dev(), out.width * out.height * sizeof[i16]()), out.width, out.height);
+    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * sizeof[i16]()), img.width, img.height);
+    let tmp_gpu = get_img_i16(acc_alloc(acc_dev(), tmp.width * tmp.height * sizeof[i16]()), tmp.width, tmp.height);
+    copy(img.buf, img_gpu.buf, img.width * img.height * sizeof[i16]());
+    copy(tmp.buf, tmp_gpu.buf, tmp.width * tmp.height * sizeof[i16]());
 
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             let gid_x = acc_gidx();
             let gid_y = acc_tidy() + acc_bdimy() * acc_bidy() * unroll;
-            let out_acc = get_write_acci16(out_gpu);
-            let img_acc = get_read_acci16(img_gpu, 4, nobh_center_i16, nobh_center_i16);
-            let tmp_acc = get_read_acci16(tmp_gpu, 4, nobh_center_i16, nobh_center_i16);
+            let out_acc = get_acci16(out_gpu);
+            let img_acc = get_acci16(img_gpu);
+            let tmp_acc = get_acci16(tmp_gpu);
 
             for i in range(0, unroll) {
                 body(gid_x, gid_y + i * acc_bdimy(), out_acc, img_acc, tmp_acc);
@@ -119,18 +119,18 @@ fn iteration3i(out: Imgi16, img: Imgi16, tmp: Imgi16,
         }
     }
 
-    copy(out_gpu.buf, out.buf, out.width * out.height * 2);
+    copy(out_gpu.buf, out.buf, out.width * out.height * sizeof[i16]());
     release(out_gpu.buf);
     release(img_gpu.buf);
     release(tmp_gpu.buf);
 }
 fn reduce(img: Imgi16, body: fn(i32, i32, Acci16) -> i32) -> i32 {
     // temporary memory for reduction
-    let tmp_buf = acc_alloc(acc_dev(), img.width * 32);
-    let mut tmp = tmp_buf.data as &[i32];
+    let tmp_buf = acc_alloc(acc_dev(), img.width * sizeof[i32]());
+    let mut tmp = bitcast[&[1][i32]](tmp_buf.data);
 
-    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * 2), img.width, img.height);
-    copy(img.buf, img_gpu.buf, img.width * img.height * 2);
+    let img_gpu = get_img_i16(acc_alloc(acc_dev(), img.width * img.height * sizeof[i16]()), img.width, img.height);
+    copy(img.buf, img_gpu.buf, img.width * img.height * sizeof[i16]());
 
     // reduce all lines to temporary memory
     let grid1  = (img_gpu.width, 1, 1);
@@ -138,7 +138,7 @@ fn reduce(img: Imgi16, body: fn(i32, i32, Acci16) -> i32) -> i32 {
     for benchmark_acc() {
         with acc(acc_dev(), grid1, block1) @{
             let mut sum = 0;
-            let img_acc = get_read_acci16(img_gpu, 4, nobh_center_i16, nobh_center_i16);
+            let img_acc = get_acci16(img_gpu);
             for y in $range(0, img_gpu.height) @{
                 sum += body(acc_gidx(), y, img_acc);
             }
@@ -164,20 +164,20 @@ fn reduce(img: Imgi16, body: fn(i32, i32, Acci16) -> i32) -> i32 {
     }
 
     // return sum stored in first element
-    let sum_buf = alloc_host(4 * 1);
-    copy(tmp_buf, sum_buf, 4);
-    let sum = (sum_buf.data as &[i32])(0);
+    let sum_buf = alloc_cpu(sizeof[i32]());
+    copy(tmp_buf, sum_buf, sizeof[i32]());
+    let sum = bitcast[&[i32]](sum_buf.data)(0);
     release(sum_buf);
     release(tmp_buf);
     release(img_gpu.buf);
     sum
 }
 fn histogram(img: Img, body: fn(i32, i32, Acc) -> i32) -> Buffer {
-    let hist_buf = acc_alloc(acc_dev(), 256 * 4);
-    let mut hist = hist_buf.data as &[1][i32];
+    let hist_buf = acc_alloc(acc_dev(), 256 * sizeof[i32]());
+    let mut hist = bitcast[&[1][i32]](hist_buf.data);
 
-    let img_gpu = get_img(acc_alloc(acc_dev(), img.width * img.height * 4), img.width, img.height);
-    copy(img.buf, img_gpu.buf, img.width * img.height * 4);
+    let img_gpu = get_img(acc_alloc(acc_dev(), img.width * img.height * sizeof[f32]()), img.width, img.height);
+    copy(img.buf, img_gpu.buf, img.width * img.height * sizeof[f32]());
 
     let grid  = (img.width, 1, 1);
     let block = (256, 1, 1);
@@ -186,8 +186,8 @@ fn histogram(img: Img, body: fn(i32, i32, Acc) -> i32) -> Buffer {
             hist(acc_gidx()) = 0;
         }
         with acc(acc_dev(), grid, block) @{
-            let mut sm_hist = reserve_shared_i32(256);
-            let img_acc = get_read_acc(img_gpu, 4, nobh_center, nobh_center);
+            let mut sm_hist = reserve_shared[i32](256);
+            let img_acc = get_acc(img_gpu);
             for y in $range(0, img.height) @{
                 let bin = body(acc_gidx(), y, img_acc);
                 atomic_add_local(&sm_hist(bin), 1);
@@ -198,45 +198,46 @@ fn histogram(img: Img, body: fn(i32, i32, Acc) -> i32) -> Buffer {
 
     hist_buf
 }
-fn inclusive_scan(hist_buf: Buffer, size: i32, body: fn(i32, Buffer) -> i32) -> Buffer {
-    let scan_buf = acc_alloc(acc_dev(), size * 4);
-    let mut scan = scan_buf.data as &[i32];
-    let     hist = hist_buf.data as &[i32];
-
-    // perform scan per block in shared memory first
-    let block_size = if size <= 256 { 128 } else { 256 };
-    let num_blocks = size / (2 * block_size);
-    let tmp_buf = acc_alloc(acc_dev(), num_blocks * 4);
-    let mut tmp = tmp_buf.data as &[i32];
-
+fn inclusive_scan(hist_buf: Buffer, size: i32) -> Buffer {
     fn for_shift_down(a: i32, b: i32, body: fn(i32, fn())) -> () {
         if a > b {
             body(a);
-            for_shift_down(a>>1, b, body, return)
+            for_shift_down(a >> 1, b, body, return)
         }
     }
     fn for_shift_up(a: i32, b: i32, body: fn(i32, fn())) -> () {
         if a < b {
             body(a);
-            for_shift_up(a<<1, b, body, return)
+            for_shift_up(a << 1, b, body, return)
         }
     }
 
+    let scan_buf = acc_alloc(acc_dev(), size * sizeof[i32]());
+    let mut scan = bitcast[&[1][i32]](scan_buf.data);
+    let     hist = bitcast[&[1][i32]](hist_buf.data);
+
+    // perform scan per block in shared memory first
+    let block_size = if size <= 256 { 128 } else { 256 };
+    let num_blocks = size / (2 * block_size);
+    let tmp_buf = acc_alloc(acc_dev(), num_blocks * sizeof[i32]());
+    let mut tmp = bitcast[&[1][i32]](tmp_buf.data);
+
     let grid  = (size / 2, 1, 1);
     let block = (block_size, 1, 1);
+
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             let gid = acc_gidx();
             let tid = acc_tidx();
             let sm_size = 2 * block_size;
-            let mut sm_tmp = reserve_shared_i32(sm_size);
+            let mut sm_tmp = reserve_shared[i32](sm_size);
 
             // load input into shared memory
             sm_tmp(2 * tid)     = hist(2 * gid);
             sm_tmp(2 * tid + 1) = hist(2 * gid + 1);
 
             let mut offset = 1;
-            for d in for_shift_down(sm_size >> 1, 0) { // build sum in place up the tree
+            for d in for_shift_down(sm_size >> 1, 0) @{ // build sum in place up the tree
                 acc_barrier();
                 if tid < d @{
                     let ai = offset * (2 * tid + 1) - 1;
@@ -250,7 +251,7 @@ fn inclusive_scan(hist_buf: Buffer, size: i32, body: fn(i32, Buffer) -> i32) -> 
             // if tid == 0 { sm_tmp(sm_size - 1) = 0; }
 
             // traverse down tree & build scan
-            for d in for_shift_up(1, sm_size) {
+            for d in for_shift_up(1, sm_size) @{
                 offset >>= 1;
                 acc_barrier();
                 if tid < d @{
@@ -281,7 +282,7 @@ fn inclusive_scan(hist_buf: Buffer, size: i32, body: fn(i32, Buffer) -> i32) -> 
             with acc(acc_dev(), grid1, block1) @{
                 let tid = acc_tidx();
                 let sm_size = num_blocks;
-                let mut sm_tmp = reserve_shared_i32(sm_size);
+                let mut sm_tmp = reserve_shared[i32](sm_size);
 
                 // load input into shared memory
                 sm_tmp(tid) = tmp(tid);
@@ -310,7 +311,7 @@ fn inclusive_scan(hist_buf: Buffer, size: i32, body: fn(i32, Buffer) -> i32) -> 
             with acc(acc_dev(), grid2, block2) @{
                 let tid = acc_tidx();
                 let gid = acc_gidx() + block_size; // first block hold already the correct scan results
-                let mut sm_tmp = reserve_shared_i32(1);
+                let mut sm_tmp = reserve_shared[i32](1);
 
                 if tid == 0 @{
                     sm_tmp(0) = tmp(acc_bidx());
@@ -327,26 +328,27 @@ fn inclusive_scan(hist_buf: Buffer, size: i32, body: fn(i32, Buffer) -> i32) -> 
     release(tmp_buf);
     scan_buf
 }
-fn find_position(scan: Buffer, mut size: i32, body: fn(i32, Buffer) -> i32) -> i32 {
-    let elem_buf = acc_alloc(acc_dev(), 1 * 4);
-    let size_buf = Buffer { device : 0, data : &size as &[i8] };
-    copy(size_buf, elem_buf, 4 * 1);
+fn find_position(scan_buf: Buffer, mut size: i32, body: fn(i32) -> i32) -> i32 {
+    let size_buf = Buffer { device : 0, data : bitcast[&[i8]](&size) };
+    let pos_buf  = acc_alloc(acc_dev(), sizeof[i32]());
+    copy(size_buf, pos_buf, sizeof[i32]());
 
     let grid  = (size, 1, 1);
     let block = (256, 1, 1);
     for benchmark_acc() {
         with acc(acc_dev(), grid, block) @{
             // TODO: make sure index computation stays on the device
-            let mut elem = magic_elem_id(elem_buf.data as &[1][i32]);
-            if body(acc_gidx(), scan) != 0 @{
-                atomic_min_global(&elem(0), acc_gidx());
+            let mut pos = magic_elem_id(bitcast[&[1][i32]](pos_buf.data));
+            let scan    = bitcast[&[1][i32]](scan_buf.data);
+            if body(scan(acc_gidx())) != 0 @{
+                atomic_min_global(&pos(0), acc_gidx());
             }
         }
     }
 
     let mut result:i32;
-    let r_buf = Buffer { device : 0, data : &result as &[i8] };
-    copy(elem_buf, r_buf, 1 * 4);
-    release(elem_buf);
+    let r_buf = Buffer { device : 0, data : bitcast[&[i8]](&result) };
+    copy(pos_buf, r_buf, sizeof[i32]());
+    release(pos_buf);
     result
 }

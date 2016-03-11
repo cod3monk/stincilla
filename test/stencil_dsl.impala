@@ -24,11 +24,8 @@ fn apply_bh(mut index: i32,
     index
 }
 
-fn get_elem(dev: i32, fld: Array, idx: i32) -> f32 { (fld.get(dev).data as &[f32])(idx) }
-// TODO: this should work ???
-//fn set_elem(dev: i32, fld: Array, idx: i32, val: f32) -> () { (fld.get(dev).data as &[f32])(idx) = val }
-// workaround:
-fn set_elem(dev: i32, fld: Array, idx: i32, val: f32) -> () { let mut data = fld.get(dev).data as &[f32]; data(idx) = val }
+fn get_elem(dev: i32, fld: Array, idx: i32) -> f32 { bitcast[&[f32]](fld.get(dev).data)(idx) }
+fn set_elem(dev: i32, fld: Array, idx: i32, val: f32) -> () { let mut ptr = bitcast[&[f32]](fld.get(dev).data); ptr(idx) = val }
 fn iterate_field(dev: i32, out: Array, arr: Array, stencil: [f32 * 3],
                  bh_lower: fn(i32, i32) -> i32, bh_upper: fn(i32, i32) -> i32,
                  body: fn(i32, i32, Accessor, Accessor, [f32 * 3]) -> ()) -> () {
@@ -143,8 +140,8 @@ fn main(dev: i32) -> i32 {
 
     // do something with the result as test
     let mut sum = 0.0f;
-    for iter in range(0, width*height) {
-        sum += (out.get(dev).data as &[f32])(iter)
+    for i in range(0, width*height) {
+        sum += bitcast[&[f32]](out.get(dev).data)(i)
     }
 
     release(arr.get(0));
