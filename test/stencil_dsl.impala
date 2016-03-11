@@ -84,19 +84,19 @@ fn create_array(mut fld: Field) -> Array {
     Array {
         set : |dev: i32, buf: Buffer| -> () {
             if dev == 0 {
-                thorin_copy(thorin_device(0, 0), buf.data as &i8, 0i64, thorin_device(0, 0), fld.cpu.data as &i8, 0i64, (fld.cols * fld.rows * 4) as i64);
+                thorin_copy(thorin_device(0, 0), bitcast[&i8](buf.data), 0i64, thorin_device(0, 0), bitcast[&i8](fld.cpu.data), 0i64, (fld.cols * fld.rows * sizeof[f32]()) as i64);
                 fld.on = 0
             } else {
-                thorin_copy(thorin_device(1, 0), buf.data as &i8, 0i64, thorin_device(1, 0), fld.acc.data as &i8, 0i64, (fld.cols * fld.rows * 4) as i64);
+                thorin_copy(thorin_device(1, 0), bitcast[&i8](buf.data), 0i64, thorin_device(1, 0), bitcast[&i8](fld.acc.data), 0i64, (fld.cols * fld.rows * sizeof[f32]()) as i64);
                 fld.on = 1
             }
         },
         get : |dev: i32| -> Buffer {
             if dev != fld.on {
                 if dev == 0 {
-                    thorin_copy(thorin_device(1, 0), fld.acc.data as &i8, 0i64, thorin_device(0, 0), fld.cpu.data as &i8, 0i64, (fld.cols * fld.rows * 4) as i64);
+                    thorin_copy(thorin_device(1, 0), bitcast[&i8](fld.acc.data), 0i64, thorin_device(0, 0), bitcast[&i8](fld.cpu.data), 0i64, (fld.cols * fld.rows * sizeof[f32]()) as i64);
                 } else {
-                    thorin_copy(thorin_device(0, 0), fld.cpu.data as &i8, 0i64, thorin_device(1, 0), fld.acc.data as &i8, 0i64, (fld.cols * fld.rows * 4) as i64);
+                    thorin_copy(thorin_device(0, 0), bitcast[&i8](fld.cpu.data), 0i64, thorin_device(1, 0), bitcast[&i8](fld.acc.data), 0i64, (fld.cols * fld.rows * sizeof[f32]()) as i64);
                 }
             }
             if dev == 0 { fld.on = 0; fld.cpu } else { fld.on = 1; fld.acc }
@@ -121,8 +121,8 @@ fn main(dev: i32) -> i32 {
     let a       = 0.2f;
     let b       = 1.0f - 4.0f * a;
     let num_it  = 100;
-    let arr_fld = Field { cpu : alloc_host(width * height * sizeof[f32]()), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
-    let out_fld = Field { cpu : alloc_host(width * height * sizeof[f32]()), acc : alloc_host(width * height * 4), cols : width, rows : height, stride : width, on : dev };
+    let arr_fld = Field { cpu : alloc_cpu(width * height * sizeof[f32]()), acc : alloc_cpu(width * height * sizeof[f32]()), cols : width, rows : height, stride : width, on : dev };
+    let out_fld = Field { cpu : alloc_cpu(width * height * sizeof[f32]()), acc : alloc_cpu(width * height * sizeof[f32]()), cols : width, rows : height, stride : width, on : dev };
     let arr     = create_array(arr_fld);
     let out     = create_array(out_fld);
     let stencil = [b, a, b];
