@@ -1,9 +1,9 @@
-fn iteration1f1i(out: Img, arr: Img,
-                 bh_lower: fn(i32, i32, i32, fn(i16)) -> i32, bh_upper: fn(i32, i32, i32, fn(i16)) -> i32,
-                 body: fn(i32, i32, Acc, Acci16) -> ()
-                ) -> () {
+fn iteration1f1i[T](out: Img, arr: Img,
+                    bh_lower: fn(i32, i32, i32, fn(T)) -> i32, bh_upper: fn(i32, i32, i32, fn(T)) -> i32,
+                    body: fn(i32, i32, Acc, Acci16[T]) -> ()
+                   ) -> () {
     let out_acc = get_acc(out);
-    let arr_acc = get_acci16_bh(arr, 10, bh_lower, bh_upper);
+    let arr_acc = get_acci16_bh[T](arr, 10, bh_lower, bh_upper);
 
     for benchmark_cpu() {
         for y in $outer_loop(0, out.height) {
@@ -13,12 +13,12 @@ fn iteration1f1i(out: Img, arr: Img,
         }
     }
 }
-fn iteration2i(out: Img, arr: Img,
-               bh_lower: fn(i32, i32, i32, fn(i16)) -> i32, bh_upper: fn(i32, i32, i32, fn(i16)) -> i32,
-               body: fn(i32, i32, Acci16, Acci16) -> ()
-              ) -> () {
-    let out_acc = get_acci16(out);
-    let arr_acc = get_acci16_bh(arr, 10, bh_lower, bh_upper);
+fn iteration2i[T](out: Img, arr: Img,
+                  bh_lower: fn(i32, i32, i32, fn(T)) -> i32, bh_upper: fn(i32, i32, i32, fn(T)) -> i32,
+                  body: fn(i32, i32, Acci16[T], Acci16[T]) -> ()
+                 ) -> () {
+    let out_acc = get_acci16[T](out);
+    let arr_acc = get_acci16_bh[T](arr, 10, bh_lower, bh_upper);
 
     for benchmark_cpu() {
         for y in $outer_loop(0, out.height) {
@@ -28,12 +28,12 @@ fn iteration2i(out: Img, arr: Img,
         }
     }
 }
-fn iteration2i1m(out: Img, img: Img, map: Img,
-                 bh_lower: fn(i32, i32, i32, fn(i16)) -> i32, bh_upper: fn(i32, i32, i32, fn(i16)) -> i32,
-                 body: fn(i32, i32, Acci16, Acci16, Acc) -> ()
-                ) -> () {
-    let out_acc = get_acci16(out);
-    let img_acc = get_acci16_bh(img, 10, bh_lower, bh_upper);
+fn iteration2i1m[T](out: Img, img: Img, map: Img,
+                    bh_lower: fn(i32, i32, i32, fn(T)) -> i32, bh_upper: fn(i32, i32, i32, fn(T)) -> i32,
+                    body: fn(i32, i32, Acci16[T], Acci16[T], Acc) -> ()
+                   ) -> () {
+    let out_acc = get_acci16[T](out);
+    let img_acc = get_acci16_bh[T](img, 10, bh_lower, bh_upper);
     let map_acc = get_acc(map);
 
     for benchmark_cpu() {
@@ -44,12 +44,12 @@ fn iteration2i1m(out: Img, img: Img, map: Img,
         }
     }
 }
-fn iteration3i(out: Img, img: Img, tmp: Img,
-               body: fn(i32, i32, Acci16, Acci16, Acci16) -> ()
-              ) -> () {
-    let out_acc = get_acci16(out);
-    let img_acc = get_acci16(img);
-    let tmp_acc = get_acci16(tmp);
+fn iteration3i[T](out: Img, img: Img, tmp: Img,
+                  body: fn(i32, i32, Acci16[T], Acci16[T], Acci16[T]) -> ()
+                 ) -> () {
+    let out_acc = get_acci16[T](out);
+    let img_acc = get_acci16[T](img);
+    let tmp_acc = get_acci16[T](tmp);
 
     for benchmark_cpu() {
         for y in $outer_loop(0, out.height) {
@@ -59,9 +59,9 @@ fn iteration3i(out: Img, img: Img, tmp: Img,
         }
     }
 }
-fn reduce(img: Img, body: fn(i32, i32, Acci16) -> i32) -> i32 {
+fn reduce[T](img: Img, body: fn(i32, i32, Acci16[T]) -> i32) -> i32 {
     let mut sum = 0;
-    let img_acc = get_acci16(img);
+    let img_acc = get_acci16[T](img);
     for y in $range(0, img.height) {
         for x in inner_loop(0, img.width) @{
             sum += body(x, y, img_acc);
