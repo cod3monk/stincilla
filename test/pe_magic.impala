@@ -1,0 +1,193 @@
+extern "thorin" {
+    fn sizeof[T]() -> i32;
+    fn bitcast[D, S](S) -> D;
+    fn opencl(i32, (i32, i32, i32), (i32, i32, i32), fn() -> ()) -> ();
+}
+
+extern "device" {
+    fn get_global_id(u32) -> u64;
+}
+
+extern "C" {
+    fn thorin_alloc(i32, i64) -> &i8;
+    fn thorin_alloc_host(i32, i64) -> &i8;
+    fn thorin_release(i32, &i8) -> ();
+}
+
+fn thorin_device(platform: i32, device: i32) -> i32 { platform | (device << 4) }
+
+struct Buffer {
+    device: i32,
+    data: &[i8]
+}
+
+fn alloc(dev: i32, size: i32) -> Buffer {
+    Buffer {
+        device: dev,
+        data: thorin_alloc(dev, size as i64) as &[i8]
+    }
+}
+fn alloc_host(dev: i32, size: i32) -> Buffer {
+    Buffer {
+        device: dev,
+        data: thorin_alloc_host(dev, size as i64) as &[i8]
+    }
+}
+fn release(a: Buffer) -> () { thorin_release(a.device, a.data as &i8) }
+
+fn alloc_cpu(size: i32) -> Buffer { alloc(0, size) }
+fn alloc_opencl(dev: i32, size: i32) -> Buffer { alloc(thorin_device(2, dev), size) }
+
+fn range_step(lower: i32, upper: i32, step: i32, body: fn(i32, fn())) -> () {
+    if lower < upper {
+        body(lower);
+        range_step(lower+step, upper, step, body, return)
+    }
+}
+
+fn range(lower: i32, upper: i32, body: fn(i32, fn())) -> () { range_step(lower, upper, 1, body) }
+
+// border handling specialization
+//fn nobh_center (idx: i32, lower: i32, upper: i32, out: fn(f32)) -> i32 { idx }
+//fn clamp_lower (idx: i32, lower: i32, upper: i32, out: fn(f32)) -> i32 {
+//    if idx < lower { lower } else { idx }
+//}
+//fn clamp_upper (idx: i32, lower: i32, upper: i32, out: fn(f32)) -> i32 {
+//    if idx >= upper { upper - 1 } else { idx }
+//}
+fn const_lower (idx: i32, lower: i32, upper: i32, cval: f32, out: fn(f32)) -> i32 {
+    if idx < lower { out(cval) } else { idx }
+}
+fn const_upper (idx: i32, lower: i32, upper: i32, cval: f32, out: fn(f32)) -> i32 {
+    if idx >= upper { out(cval) } else { idx }
+}
+fn wrap_const_fun(fun: fn(i32, i32, i32, f32, fn(f32)) -> i32, cval: f32) -> fn(i32, i32, i32, fn(f32)) -> i32 {
+    |idx, lower, upper, out| fun(idx, lower, upper, cval, out)
+}
+fn read_pixel(mut x: i32, mut y: i32, region: i32, read: fn(i32, i32) -> f32,
+              bh_lower: fn(i32, i32, i32, fn(f32)) -> i32,
+              bh_upper: fn(i32, i32, i32, fn(f32)) -> i32
+             ) -> f32 {
+    let lower_x = 0;
+    let lower_y = 0;
+    let upper_x = 1024;
+    let upper_y = 1024;
+
+    if region == 10 {
+        x = @bh_lower(x, lower_x, upper_x, return);
+        x = @bh_upper(x, lower_x, upper_x, return);
+        y = @bh_lower(y, lower_y, upper_y, return);
+        y = @bh_upper(y, lower_y, upper_y, return);
+    }
+
+    @read(x, y)
+}
+
+
+// &[1][f32]
+fn get_pixel_as1(img: Img, idx: i32) -> f32 { bitcast[&[1][f32]](img.buf.data)(idx) }
+fn set_pixel_as1(img: Img, idx: i32, val: f32) -> () { let mut ptr = bitcast[&[1][f32]](img.buf.data); ptr(idx) = val }
+fn get_acc_bh(img: Img, region: i32, bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32) -> Acc {
+    get_acc_bh_offset(img, 0, 0, region, bh_lower, bh_upper)
+}
+fn get_acc_bh_offset(img: Img, rox: i32, roy: i32, region: i32, bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32) -> Acc {
+    get_acc_asx_bh_offset(img, rox, roy, region, bh_lower, bh_upper, get_pixel_as1)
+}
+fn get_acc_asx_bh_offset(img: Img, rox: i32, roy: i32, region: i32, bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32, get_pixel_asx: fn(Img, i32) -> f32) -> Acc {
+    Acc {
+        read  : |x, y|    -> f32 { read_pixel(x + rox, y + roy, region, |x, y| -> f32 { get_pixel_asx(img, y * img.stride + x) }, bh_lower, bh_upper) },
+        write : |x, y, v| -> ()  { set_pixel_as1(img, (y + roy) * img.stride + x + rox, v) }
+    }
+}
+fn get_acc(img: Img) -> Acc {
+    get_acc_offset(img, 0, 0)
+}
+fn get_acc_offset(img: Img, rox: i32, roy: i32) -> Acc {
+    get_acc_asx_offset(img, rox, roy, get_pixel_as1)
+}
+fn get_acc_asx_offset(img: Img, rox: i32, roy: i32, get_pixel_asx: fn(Img, i32) -> f32) -> Acc {
+    Acc {
+        read  : |x, y|    get_pixel_asx(img, (y + roy) * img.stride + x + rox),
+        write : |x, y, v| set_pixel_as1(img, (y + roy) * img.stride + x + rox, v)
+    }
+}
+fn get_img(buf: Buffer, width: i32, height: i32) -> Img {
+    Img { buf : buf, width : width,  height : height, stride : width }
+}
+
+// structs for images and accessors
+struct Img {
+    buf : Buffer,
+    width  : i32,
+    height : i32,
+    stride : i32,
+}
+struct Acc {
+    read  : fn(i32, i32) -> f32,
+    write : fn(i32, i32, f32) -> (),
+}
+struct Mask {
+    data : [f32 * 3],
+    size : i32,
+}
+
+fn apply_stencil(x: i32, y: i32, acc: Acc, stencil: Mask) -> f32 {
+    let mut sum = 0.0f;
+    let half_range = stencil.size / 2;
+
+    for i in range(-half_range, half_range+1) {
+        let stencil_val = stencil.data(i + half_range);
+        if stencil_val != 0.0f {
+            sum += acc.read(x + i, y) * stencil_val;
+        } else {
+            // additional logic for empty stencil value
+        }
+    }
+
+    sum
+}
+
+fn iteration(out: Img, arr: Img, mask: Mask,
+             bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32,
+             body: fn(i32, i32, Acc, Acc, Mask) -> ()
+            ) -> () {
+    let arr_gpu = get_img(alloc_opencl(1, arr.width * arr.height * sizeof[f32]()), arr.width, arr.height);
+    let out_gpu = get_img(alloc_opencl(1, out.width * out.height * sizeof[f32]()), out.width, out.height);
+
+    let grid   = (out.width, out.height, 1);
+    let block  = (128, 1, 1);
+
+    with opencl(1, grid, block) @{
+        let gid_x = get_global_id(0u) as i32;
+        let gid_y = get_global_id(1u) as i32;
+        let arr_acc = get_acc_bh(arr_gpu, 10, bh_lower, bh_upper);
+        let out_acc = get_acc(out_gpu);
+
+        body(gid_x, gid_y, out_acc, arr_acc, mask);
+    }
+
+    release(arr_gpu.buf);
+    release(out_gpu.buf);
+}
+
+
+fn main() -> i32 {
+    let width  = 2048;
+    let height = 2048;
+    let arr    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
+    let out    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
+
+    let stencil = Mask {
+        data : [0.0f, 0.2f, 0.0f],
+        size : 3
+    };
+
+    let lower = @wrap_const_fun(const_lower, 0.0f);
+    let upper = @wrap_const_fun(const_upper, 0.0f);
+
+    for x, y, out_acc, arr_acc, stencil in @iteration(out, arr, stencil, lower, upper) {
+        out_acc.write(x, y, apply_stencil(x, y, arr_acc, stencil));
+    }
+
+    0
+}
