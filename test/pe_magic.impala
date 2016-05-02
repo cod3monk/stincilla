@@ -10,33 +10,15 @@ extern "device" {
 
 extern "C" {
     fn thorin_alloc(i32, i64) -> &i8;
-    fn thorin_alloc_host(i32, i64) -> &i8;
     fn thorin_release(i32, &i8) -> ();
 }
 
 fn thorin_device(platform: i32, device: i32) -> i32 { platform | (device << 4) }
 
-struct Buffer {
-    device: i32,
-    data: &[i8]
+fn alloc(size: i32) -> &[f32] {
+    thorin_alloc(0, size as i64) as &[f32]
 }
-
-fn alloc(dev: i32, size: i32) -> Buffer {
-    Buffer {
-        device: dev,
-        data: thorin_alloc(dev, size as i64) as &[i8]
-    }
-}
-fn alloc_host(dev: i32, size: i32) -> Buffer {
-    Buffer {
-        device: dev,
-        data: thorin_alloc_host(dev, size as i64) as &[i8]
-    }
-}
-fn release(a: Buffer) -> () { thorin_release(a.device, a.data as &i8) }
-
-fn alloc_cpu(size: i32) -> Buffer { alloc(0, size) }
-fn alloc_opencl(dev: i32, size: i32) -> Buffer { alloc(thorin_device(2, dev), size) }
+fn release(data: &[f32]) -> () { thorin_release(0, data as &i8) }
 
 fn range_step(lower: i32, upper: i32, step: i32, body: fn(i32, fn())) -> () {
     if lower < upper {
@@ -85,8 +67,8 @@ fn read_pixel(mut x: i32, mut y: i32, region: i32, read: fn(i32, i32) -> f32,
 
 
 // &[1][f32]
-fn get_pixel_as1(img: Img, idx: i32) -> f32 { bitcast[&[1][f32]](img.buf.data)(idx) }
-fn set_pixel_as1(img: Img, idx: i32, val: f32) -> () { let mut ptr = bitcast[&[1][f32]](img.buf.data); ptr(idx) = val }
+fn get_pixel_as1(img: Img, idx: i32) -> f32 { bitcast[&[1][f32]](img.data)(idx) }
+fn set_pixel_as1(img: Img, idx: i32, val: f32) -> () { let mut ptr = bitcast[&[1][f32]](img.data); ptr(idx) = val }
 fn get_acc_bh(img: Img, region: i32, bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32) -> Acc {
     get_acc_bh_offset(img, 0, 0, region, bh_lower, bh_upper)
 }
@@ -111,13 +93,13 @@ fn get_acc_asx_offset(img: Img, rox: i32, roy: i32, get_pixel_asx: fn(Img, i32) 
         write : |x, y, v| set_pixel_as1(img, (y + roy) * img.stride + x + rox, v)
     }
 }
-fn get_img(buf: Buffer, width: i32, height: i32) -> Img {
-    Img { buf : buf, width : width,  height : height, stride : width }
+fn get_img(data: &[f32], width: i32, height: i32) -> Img {
+    Img { data : data, width : width,  height : height, stride : width }
 }
 
 // structs for images and accessors
 struct Img {
-    buf : Buffer,
+    data   : &[f32],
     width  : i32,
     height : i32,
     stride : i32,
@@ -151,8 +133,8 @@ fn iteration(out: Img, arr: Img, mask: Mask,
              bh_lower: fn(i32, i32, i32, fn(f32)) -> i32, bh_upper: fn(i32, i32, i32, fn(f32)) -> i32,
              body: fn(i32, i32, Acc, Acc, Mask) -> ()
             ) -> () {
-    let arr_gpu = get_img(alloc_opencl(1, arr.width * arr.height * sizeof[f32]()), arr.width, arr.height);
-    let out_gpu = get_img(alloc_opencl(1, out.width * out.height * sizeof[f32]()), out.width, out.height);
+    let arr_gpu = get_img(alloc(arr.width * arr.height * sizeof[f32]()), arr.width, arr.height);
+    let out_gpu = get_img(alloc(out.width * out.height * sizeof[f32]()), out.width, out.height);
 
     let grid   = (out.width, out.height, 1);
     let block  = (128, 1, 1);
@@ -166,16 +148,16 @@ fn iteration(out: Img, arr: Img, mask: Mask,
         body(gid_x, gid_y, out_acc, arr_acc, mask);
     }
 
-    release(arr_gpu.buf);
-    release(out_gpu.buf);
+    release(arr_gpu.data);
+    release(out_gpu.data);
 }
 
 
 fn main() -> i32 {
     let width  = 2048;
     let height = 2048;
-    let arr    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
-    let out    = Img { buf : alloc_cpu(width * height * sizeof[f32]()), width : width, height : height, stride : width };
+    let arr    = Img { data : alloc(width * height * sizeof[f32]()), width : width, height : height, stride : width };
+    let out    = Img { data : alloc(width * height * sizeof[f32]()), width : width, height : height, stride : width };
 
     let stencil = Mask {
         data : [0.0f, 0.2f, 0.0f],
